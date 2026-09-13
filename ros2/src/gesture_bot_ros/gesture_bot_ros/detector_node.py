@@ -15,7 +15,6 @@ is a ``vision_msgs/Pose2D`` with a nested ``position``. On older releases
 """
 
 import rclpy
-from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
@@ -27,6 +26,7 @@ from vision_msgs.msg import (
 )
 
 from . import _core
+from .image_bridge import fill_bgr8, to_bgr8
 
 _core.ensure_on_path()
 
@@ -59,7 +59,6 @@ class DetectorNode(Node):
         )
         self.get_logger().info(f"YOLO running on device='{self.detector.device}'")
 
-        self.bridge = CvBridge()
         self._pub = self.create_publisher(Detection2DArray, "detections", 10)
         self._annotated_pub = None
         if bool(self.get_parameter("publish_annotated").value):
@@ -72,9 +71,9 @@ class DetectorNode(Node):
 
     def _on_image(self, msg: Image):
         try:
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            frame = to_bgr8(msg)
         except Exception as exc:  # noqa: BLE001 - a bad frame must not kill the node
-            self.get_logger().warn(f"cv_bridge conversion failed: {exc}")
+            self.get_logger().warn(f"image conversion failed: {exc}")
             return
 
         detections = self.detector.detect(frame)
@@ -104,7 +103,7 @@ class DetectorNode(Node):
 
         if self._annotated_pub is not None:
             annotated = self.detector.draw(frame, detections)
-            img = self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
+            img = fill_bgr8(Image(), annotated)
             img.header = msg.header
             self._annotated_pub.publish(img)
 

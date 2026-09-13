@@ -140,28 +140,11 @@ class OpenVocabDetector:
         # transformers renamed this between 4.x and 5.x:
         #   4.x  post_process_object_detection(outputs, threshold, target_sizes)
         #   5.x  post_process_grounded_object_detection(same three, + text_labels)
-        # Both are present on their respective versions and neither is present on
-        # the other, so resolve once here rather than per frame. This is not
-        # hypothetical tidiness: this repo is developed across machines that
-        # currently run 4.48 and 5.14.
-        self._post_process = getattr(
-            self.processor, "post_process_grounded_object_detection", None
-        ) or getattr(self.processor, "post_process_object_detection", None)
-        if self._post_process is None:
-            raise RuntimeError(
-                "Owlv2Processor exposes neither post_process_grounded_object_detection "
-                "nor post_process_object_detection; transformers version "
-                "is not supported"
-            )
-
-        self.model = Owlv2ForObjectDetection.from_pretrained(model_id)
-
-        # transformers renamed this between 4.x and 5.x -- 4.48 has
-        # post_process_object_detection, 5.14 has only
-        # post_process_grounded_object_detection. Both take the same
-        # (outputs, threshold, target_sizes) and return the same
-        # scores/labels/boxes, so bind whichever exists rather than pinning a
-        # transformers version. Resolved once here, not per frame.
+        # Both take the same arguments and return the same scores/labels/boxes,
+        # and neither version has the other's name, so bind whichever exists
+        # rather than pinning a transformers version. Resolved once here, not per
+        # frame. Not hypothetical tidiness: this repo is developed across machines
+        # currently running 4.48 and 5.14.
         self._post_process = getattr(
             self.processor, "post_process_grounded_object_detection", None
         ) or getattr(self.processor, "post_process_object_detection", None)
@@ -170,19 +153,42 @@ class OpenVocabDetector:
                 "Owlv2Processor exposes neither post_process_grounded_object_detection "
                 "nor post_process_object_detection; unsupported transformers version"
             )
+
+        self.model = Owlv2ForObjectDetection.from_pretrained(model_id)
+
         # fp16 on CUDA roughly halves both weights and activations; MPS and CPU
         # stay fp32, where half precision is either unsupported or slower.
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.model = self.model.to(self.device, dtype=self.dtype).eval()
 
-        # Text features depend only on the queries, so encode them once here
-        # rather than per frame -- that is most of the per-call cost avoided.
-        self._text_inputs = self.processor(
-            text=[self.queries], return_tensors="pt"
-        ).to(self.device)
+        self._text_inputs = None
+        self.set_queries(self.queries)
 
         # Warm up so the first real frame is not paying kernel autotune + alloc.
         self.detect(np.zeros((480, 640, 3), np.uint8))
+
+    def set_queries(self, queries):
+        """Replace the vocabulary, re-encoding the text features.
+
+        Text features depend only on the query strings, so they are encoded once
+        here rather than per frame -- that is most of the per-call cost avoided,
+        and it is what makes changing ``locate_node``'s ``queries`` parameter on
+        a running node cheap.
+
+        **Atomic on purpose.** The encode happens into a local first, and the two
+        attributes are swapped in only once it has succeeded. ``detect()`` indexes
+        ``self.queries[cls]`` with a class index produced from ``_text_inputs``,
+        so a half-applied change is not a stale vocabulary -- it is boxes labelled
+        with the wrong words, or an IndexError, depending on whether the new list
+        happens to be shorter.
+        """
+        queries = [q.strip() for q in queries if q and q.strip()]
+        if not queries:
+            raise ValueError("at least one non-empty query is required")
+        text_inputs = self.processor(text=[queries], return_tensors="pt").to(self.device)
+        self.queries = queries
+        self._text_inputs = text_inputs
+        return queries
 
     def detect(self, frame) -> List[Detection]:
         """Run the model and return structured boxes -- no drawing, no side effects.

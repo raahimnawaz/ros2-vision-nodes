@@ -34,7 +34,6 @@ something new without a restart -- the same live-tuning property
 """
 
 import rclpy
-from cv_bridge import CvBridge
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
@@ -47,6 +46,7 @@ from vision_msgs.msg import (
 )
 
 from . import _core
+from .image_bridge import fill_bgr8, to_bgr8
 
 _core.ensure_on_path()
 
@@ -71,7 +71,9 @@ class LocateNode(Node):
         from webcam_locate import OpenVocabDetector
 
         self._OpenVocabDetector = OpenVocabDetector
-        queries = list(self.get_parameter("queries").value)
+        # Same cleaning as a live `ros2 param set`, so a launch file and a
+        # parameter update cannot disagree about what counts as a valid list.
+        queries = _core.normalize_queries(self.get_parameter("queries").value)
         self.detector = OpenVocabDetector(
             queries,
             conf=float(self.get_parameter("conf").value),
@@ -84,7 +86,6 @@ class LocateNode(Node):
 
         self.add_on_set_parameters_callback(self._on_set_parameters)
 
-        self.bridge = CvBridge()
         self._pub = self.create_publisher(Detection2DArray, "detections", 10)
         self._annotated_pub = None
         if bool(self.get_parameter("publish_annotated").value):
@@ -102,36 +103,45 @@ class LocateNode(Node):
     def _on_set_parameters(self, params):
         """Re-encode text features when the queries change; reject bad input.
 
-        Returning successful=False leaves the previous queries in place, so a
-        typo cannot leave the node running with no vocabulary at all.
+        The whole batch is validated before any of it is applied, for the same
+        reason ``decision_node`` does it: rclpy applies *nothing* when this
+        callback returns unsuccessful, so mutating as we iterate would leave the
+        detector holding values the parameter store rejected, and
+        ``ros2 param get queries`` would disagree with what the node is actually
+        looking for.
+
+        Re-encoding is the one step that can still fail after validation passes
+        -- the tokenizer is the authority on what it will accept, not us -- so it
+        goes first among the applies and ``set_queries`` swaps its two attributes
+        in only on success.
         """
+        reason = _core.reject_batch((p.name, p.value) for p in params)
+        if reason is not None:
+            self.get_logger().warn(f"rejected parameter update: {reason}")
+            return SetParametersResult(successful=False, reason=reason)
+
         for p in params:
-            if p.name == "queries":
-                queries = [q.strip() for q in list(p.value) if q and q.strip()]
-                if not queries:
-                    return SetParametersResult(
-                        successful=False,
-                        reason="queries must contain at least one non-empty string",
-                    )
-                try:
-                    self.detector.queries = queries
-                    self.detector._text_inputs = self.detector.processor(
-                        text=[queries], return_tensors="pt"
-                    ).to(self.detector.device)
-                except Exception as exc:  # noqa: BLE001
-                    return SetParametersResult(
-                        successful=False, reason=f"re-encoding queries failed: {exc}"
-                    )
-                self.get_logger().info(f"queries -> {queries}")
-            elif p.name == "conf":
+            if p.name != "queries":
+                continue
+            try:
+                applied = self.detector.set_queries(_core.normalize_queries(p.value))
+            except Exception as exc:  # noqa: BLE001 - tokenizer has final say
+                self.get_logger().warn(f"re-encoding queries failed: {exc}")
+                return SetParametersResult(
+                    successful=False, reason=f"re-encoding queries failed: {exc}"
+                )
+            self.get_logger().info(f"queries -> {applied}")
+
+        for p in params:
+            if p.name == "conf":
                 self.detector.conf = float(p.value)
         return SetParametersResult(successful=True)
 
     def _on_image(self, msg: Image):
         try:
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            frame = to_bgr8(msg)
         except Exception as exc:  # noqa: BLE001 - a bad frame must not kill the node
-            self.get_logger().warn(f"cv_bridge conversion failed: {exc}")
+            self.get_logger().warn(f"image conversion failed: {exc}")
             return
 
         try:
@@ -165,7 +175,7 @@ class LocateNode(Node):
 
         if self._annotated_pub is not None:
             annotated = self.detector.draw(frame, detections)
-            img = self.bridge.cv2_to_imgmsg(annotated, encoding="bgr8")
+            img = fill_bgr8(Image(), annotated)
             img.header = msg.header
             self._annotated_pub.publish(img)
 

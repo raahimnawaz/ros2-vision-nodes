@@ -18,13 +18,13 @@ Two things matter here beyond calling ``apply()``:
 """
 
 import rclpy
-from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 
 from . import _core
+from .image_bridge import fill_bgr8
 
 _core.ensure_on_path()
 
@@ -85,7 +85,6 @@ class BaseDriverNode(Node):
 
         self._sub = self.create_subscription(Twist, "cmd_vel", self._on_cmd, 10)
 
-        self.bridge = CvBridge()
         self._render_pub = None
         if bool(self.get_parameter("publish_render").value):
             self._render_pub = self.create_publisher(Image, "~/render", 1)
@@ -130,7 +129,7 @@ class BaseDriverNode(Node):
         if self._render_pub is not None:
             frame = self.actuator.render()
             if frame is not None:
-                img = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+                img = fill_bgr8(Image(), frame)
                 img.header.stamp = self.get_clock().now().to_msg()
                 img.header.frame_id = "base_link"
                 self._render_pub.publish(img)

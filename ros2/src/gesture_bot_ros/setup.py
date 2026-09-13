@@ -21,7 +21,6 @@ setup(
     maintainer_email="raahimtnawaz@gmail.com",
     description="ROS2 wrapper nodes for the gesture_bot perception -> decision -> actuation loop.",
     license="MIT",
-    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "gesture_node = gesture_bot_ros.gesture_node:main",

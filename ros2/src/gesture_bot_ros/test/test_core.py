@@ -148,3 +148,62 @@ def test_batch_rejects_if_any_member_is_bad():
 def test_batch_reports_the_first_reason():
     reason = _core.reject_batch([("stable_frames", 0), ("confidence_min", 9.0)])
     assert "stable_frames" in reason
+
+
+# ------------------------------------------------- open-vocabulary queries
+def test_queries_are_stripped_and_blanks_dropped():
+    assert _core.normalize_queries(["  cup ", "", "  ", "laptop"]) == ["cup", "laptop"]
+
+
+def test_a_bare_string_is_not_a_query_list():
+    """list("cup") is ["c", "u", "p"] -- three one-letter queries and no error.
+    The launch file passes a comma-separated string, so this is a live foot-gun,
+    not a theoretical one."""
+    with pytest.raises(ValueError, match="not a single string"):
+        _core.normalize_queries("cup")
+
+
+@pytest.mark.parametrize("value", [[], ["", "   "]])
+def test_an_empty_vocabulary_is_an_error_not_an_empty_list(value):
+    """OWLv2 with no queries returns no detections forever, so the node would
+    look blind rather than misconfigured."""
+    with pytest.raises(ValueError, match="at least one"):
+        _core.normalize_queries(value)
+
+
+def test_non_string_entries_are_rejected():
+    with pytest.raises(ValueError, match="strings"):
+        _core.normalize_queries(["cup", 3])
+
+
+@pytest.mark.parametrize("value", [["cup"], ["cup", "a red mug"]])
+def test_valid_queries_pass_parameter_validation(value):
+    assert _core.reject_parameter("queries", value) is None
+
+
+@pytest.mark.parametrize("value", ["cup", [], ["  "], ["cup", 3], 7])
+def test_invalid_queries_are_rejected_by_name(value):
+    assert _core.reject_parameter("queries", value), f"{value!r} should be rejected"
+
+
+@pytest.mark.parametrize("value,ok", [(0.0, True), (1.0, True), (0.1, True),
+                                      (-0.1, False), (1.5, False)])
+def test_detector_conf_is_bounded_to_the_unit_interval(value, ok):
+    """locate_node and detector_node both expose `conf` as a score threshold.
+    Outside [0, 1] it is not a threshold, it is an off switch in one direction
+    and a firehose in the other."""
+    rejected = _core.reject_parameter("conf", value)
+    assert (rejected is None) is ok
+
+
+def test_a_bad_query_list_sinks_a_batch_that_also_sets_conf():
+    """The locate_node desync guard.
+
+    The callback used to apply values as it iterated, so a batch of
+    (queries, conf) with a bad conf left the *re-encoded vocabulary* in place
+    while rclpy rejected the whole batch -- the node would then be looking for
+    something `ros2 param get queries` said it was not.
+    """
+    assert _core.reject_batch([("queries", ["cup"]), ("conf", 5.0)])
+    assert _core.reject_batch([("conf", 0.2), ("queries", [])])
+    assert _core.reject_batch([("queries", ["cup"]), ("conf", 0.2)]) is None

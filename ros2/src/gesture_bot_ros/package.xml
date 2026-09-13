@@ -17,8 +17,15 @@
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>vision_msgs</depend>
-  <depend>cv_bridge</depend>
   <depend>gesture_bot_msgs</depend>
+
+  <!-- cv_bridge is deliberately NOT a dependency. It is a compiled extension
+       linked against the distro's NumPy (1.26 on Jazzy), while every model this
+       repo runs needs NumPy 2 -- opencv-python 5.x requires it outright. Under
+       NumPy 2 cv_bridge still imports and then fails per frame with
+       "KeyError: 16", so the breakage does not show up until a real image
+       arrives. gesture_bot_ros/image_bridge.py does the conversion in numpy
+       instead; see its module docstring. -->
 
   <exec_depend>v4l2_camera</exec_depend>
   <exec_depend>ros2launch</exec_depend>

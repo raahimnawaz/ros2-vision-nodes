@@ -19,13 +19,13 @@ already mirrored upstream.
 """
 
 import rclpy
-from cv_bridge import CvBridge
 from gesture_bot_msgs.msg import Gesture
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
 from . import _core
+from .image_bridge import to_bgr8
 
 _core.ensure_on_path()
 
@@ -52,7 +52,6 @@ class GestureNode(Node):
             mirror=mirror,
         )
 
-        self.bridge = CvBridge()
         self._pub = self.create_publisher(Gesture, "gesture", 10)
         self._sub = self.create_subscription(
             Image, "image_raw", self._on_image, qos_profile_sensor_data
@@ -63,9 +62,9 @@ class GestureNode(Node):
 
     def _on_image(self, msg: Image):
         try:
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+            frame = to_bgr8(msg)
         except Exception as exc:  # noqa: BLE001 - a bad frame must not kill the node
-            self.get_logger().warn(f"cv_bridge conversion failed: {exc}")
+            self.get_logger().warn(f"image conversion failed: {exc}")
             return
 
         # Raw camera coords -> display coords, before anything reads hand_x.

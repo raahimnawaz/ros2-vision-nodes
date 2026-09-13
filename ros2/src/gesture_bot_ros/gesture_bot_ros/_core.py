@@ -79,6 +79,39 @@ INTEGER_PARAMS = ("stable_frames", "lost_frames")
 # Node parameters that are not ControllerConfig fields but still need bounds.
 POSITIVE_PARAMS = ("publish_rate", "gesture_timeout")
 
+# Score thresholds. Semantically the same check as confidence_min, but these are
+# detector parameters rather than ControllerConfig fields.
+UNIT_INTERVAL_PARAMS = ("confidence_min", "conf")
+
+
+def normalize_queries(value):
+    """Clean an open-vocabulary query list, or raise ValueError.
+
+    Whitespace-only entries are dropped rather than passed to the tokenizer,
+    where they become a valid-but-meaningless query that quietly matches
+    everything. A list that is empty after cleaning is an error, not an empty
+    vocabulary: OWLv2 with no queries returns no detections forever, and the
+    node would look merely blind rather than misconfigured.
+    """
+    if isinstance(value, (str, bytes)):
+        # A bare string would otherwise iterate character by character and
+        # produce one query per letter.
+        raise ValueError("queries must be a list of strings, not a single string")
+    try:
+        items = list(value)
+    except TypeError:
+        raise ValueError(f"queries must be a list of strings, got {type(value).__name__}")
+    cleaned = []
+    for item in items:
+        if not isinstance(item, str):
+            raise ValueError(f"queries entries must be strings, got {item!r}")
+        item = item.strip()
+        if item:
+            cleaned.append(item)
+    if not cleaned:
+        raise ValueError("queries must contain at least one non-empty string")
+    return cleaned
+
 
 def reject_parameter(name, value):
     """Why setting ``name`` to ``value`` would be unsafe, or None if it is fine.
@@ -90,9 +123,14 @@ def reject_parameter(name, value):
         if name in INTEGER_PARAMS:
             if int(value) < 1:
                 return f"{name} must be >= 1"
-        elif name == "confidence_min":
+        elif name == "queries":
+            try:
+                normalize_queries(value)
+            except ValueError as exc:
+                return str(exc)
+        elif name in UNIT_INTERVAL_PARAMS:
             if not 0.0 <= float(value) <= 1.0:
-                return "confidence_min must be in [0, 1]"
+                return f"{name} must be in [0, 1]"
         elif name in POSITIVE_PARAMS:
             if float(value) <= 0.0:
                 return f"{name} must be > 0"
@@ -127,9 +165,11 @@ __all__ = [
     "INTEGER_PARAMS",
     "POSITIVE_PARAMS",
     "TUNABLE",
+    "UNIT_INTERVAL_PARAMS",
     "ControllerConfig",
     "GestureController",
     "ensure_on_path",
+    "normalize_queries",
     "reject_batch",
     "reject_parameter",
 ]
