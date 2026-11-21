@@ -1,6 +1,6 @@
-# vision_demos
+# ros2-vision-nodes
 
-[![CI](https://github.com/raahimnawaz/vision_demos/actions/workflows/ci.yml/badge.svg)](https://github.com/raahimnawaz/vision_demos/actions/workflows/ci.yml)
+[![CI](https://github.com/raahimnawaz/ros2-vision-nodes/actions/workflows/ci.yml/badge.svg)](https://github.com/raahimnawaz/ros2-vision-nodes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 
@@ -224,7 +224,7 @@ Note that a Maxwell-era card (GTX 9xx, `sm_52`) needs a PyTorch build whose
 ## Setup
 
 ```bash
-git clone https://github.com/raahimnawaz/vision_demos.git ~/vision_demos
+git clone https://github.com/raahimnawaz/ros2-vision-nodes.git ~/vision_demos
 cd ~/vision_demos
 
 python3.12 -m venv ~/vision_demos_env        # MediaPipe/Torch need Python 3.11-3.13
