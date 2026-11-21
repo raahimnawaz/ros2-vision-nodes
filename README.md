@@ -8,6 +8,8 @@ A closed **perception → decision → actuation** loop: webcam gestures drive a
 robot base, as a plain Python loop *and* as a ROS2 node graph — with the same
 control logic imported unchanged by both, and a real Arduino at the end of it.
 
+> **Used in** [workbench-copilot](https://github.com/raahimnawaz/workbench-copilot), which closes the same perception → decision → action loop with an SO-101 arm, driven by voice.
+
 | folder | what it is |
 |---|---|
 | [`gesture_bot/`](gesture_bot/) | **The project.** Webcam **gestures → decision → actuation**, with pluggable backends (2D sim, Arduino serial, computer HID) behind one `Twist`-style command. |
